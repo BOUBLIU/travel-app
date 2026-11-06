@@ -1,0 +1,67 @@
+name: Build APK Android
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: "URL du serveur d'API (optionnel, sinon données simulées)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.9"
+          cache: true
+
+      - name: Dépendances
+        run: flutter pub get
+
+      - name: Analyse
+        run: flutter analyze
+
+      - name: Tests
+        run: flutter test
+
+      - name: Build APK release
+        env:
+          API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.API_BASE_URL }}
+        run: |
+          flutter build apk --release --dart-define=API_BASE_URL="${API_BASE_URL}"
+          cp build/app/outputs/flutter-apk/app-release.apk budget-voyage.apk
+
+      - name: Artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: budget-voyage-apk
+          path: budget-voyage.apk
+
+      - name: Publier dans la release "apk-latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="apk-latest"
+          NOTES="APK construit depuis ${GITHUB_REF_NAME} (${GITHUB_SHA::7}). Installer sur la tablette : télécharger budget-voyage.apk puis autoriser l'installation depuis cette source."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" budget-voyage.apk --clobber
+            gh release edit "$TAG" --notes "$NOTES" --target "$GITHUB_SHA"
+          else
+            gh release create "$TAG" budget-voyage.apk --prerelease --title "Budget Voyage — dernier APK" --notes "$NOTES" --target "$GITHUB_SHA"
+          fi
