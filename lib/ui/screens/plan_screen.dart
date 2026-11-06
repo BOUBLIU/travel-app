@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -9,25 +10,28 @@ import '../../models/models.dart';
 import '../../services/plan_builder.dart';
 import '../../state/app_state.dart';
 import '../format.dart';
+import '../theme.dart';
+import '../widgets/common.dart';
 import 'tracking_screen.dart';
 
 /// Une couleur par jour.
+/// Couleurs système Apple, une par jour.
 const kDayColors = [
-  Color(0xFF1E88E5), Color(0xFFE53935), Color(0xFF43A047), Color(0xFFFB8C00),
-  Color(0xFF8E24AA), Color(0xFF00ACC1), Color(0xFF6D4C41), Color(0xFFD81B60),
-  Color(0xFF3949AB), Color(0xFF7CB342), Color(0xFFF4511E), Color(0xFF546E7A),
+  Color(0xFF007AFF), Color(0xFFFF9500), Color(0xFF34C759), Color(0xFFFF2D55),
+  Color(0xFF5856D6), Color(0xFF5AC8FA), Color(0xFFAF52DE), Color(0xFFFFCC00),
+  Color(0xFF30B0C7), Color(0xFFFF3B30), Color(0xFF00C7BE), Color(0xFFA2845E),
 ];
 
 Color dayColor(int day) => kDayColors[day % kDayColors.length];
 
 IconData planIcon(PlanKind k) => switch (k) {
-      PlanKind.flightArrival => Icons.flight_land,
-      PlanKind.flightDeparture => Icons.flight_takeoff,
-      PlanKind.transfer => Icons.airport_shuttle,
-      PlanKind.checkIn => Icons.login,
-      PlanKind.checkOut => Icons.logout,
-      PlanKind.activity => Icons.local_activity,
-      PlanKind.train => Icons.train,
+      PlanKind.flightArrival => CupertinoIcons.arrow_down_right_circle_fill,
+      PlanKind.flightDeparture => CupertinoIcons.arrow_up_right_circle_fill,
+      PlanKind.transfer => CupertinoIcons.arrow_right_arrow_left,
+      PlanKind.checkIn => CupertinoIcons.bed_double_fill,
+      PlanKind.checkOut => CupertinoIcons.square_arrow_right,
+      PlanKind.activity => CupertinoIcons.ticket_fill,
+      PlanKind.train => CupertinoIcons.train_style_one,
     };
 
 /// Écran final : plan chronologique jour par jour + carte synchronisée.
@@ -102,17 +106,18 @@ class _PlanScreenState extends State<PlanScreen> {
     final list = _buildList(trip, steps, pos);
     final filter = _buildDayFilter(trip, days, all, pos);
 
+    final c = AppColors.of(context);
     return Scaffold(
       appBar: AppBar(
         title: Text(trip.name),
         actions: [
-          FilledButton.tonalIcon(
+          TextButton.icon(
             onPressed: () => Navigator.push(
                 context, MaterialPageRoute(builder: (_) => TrackingScreen(tripId: trip.id))),
-            icon: const Icon(Icons.account_balance_wallet_outlined),
-            label: const Text('Suivi des dépenses'),
+            icon: const Icon(CupertinoIcons.creditcard, size: 18),
+            label: const Text('Dépenses'),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
         ],
       ),
       body: Column(
@@ -120,15 +125,30 @@ class _PlanScreenState extends State<PlanScreen> {
           filter,
           Expanded(
             child: wide
-                ? Row(children: [
-                    SizedBox(width: 440, child: list),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: map),
-                  ])
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      SizedBox(
+                        width: 460,
+                        child: Container(
+                          decoration: BoxDecoration(color: c.card, borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context)),
+                          clipBehavior: Clip.antiAlias,
+                          child: list,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context)),
+                          clipBehavior: Clip.antiAlias,
+                          child: map,
+                        ),
+                      ),
+                    ]),
+                  )
                 : Column(children: [
                     Expanded(flex: 5, child: map),
-                    const Divider(height: 1),
-                    Expanded(flex: 6, child: list),
+                    Expanded(flex: 6, child: Container(color: c.card, child: list)),
                   ]),
           ),
         ],
@@ -138,31 +158,50 @@ class _PlanScreenState extends State<PlanScreen> {
 
   Widget _buildDayFilter(Trip trip, List<int> days, List<PlanStep> all, Map<int, LatLng> pos) {
     return SizedBox(
-      height: 56,
+      height: 58,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
         children: [
-          ChoiceChip(
-            label: const Text('Tous les jours'),
+          Tag(
+            label: 'Tout le séjour',
             selected: _day == null,
-            onSelected: (_) {
+            onTap: () {
               setState(() => _day = null);
               _fit(all.map((s) => pos[s.number]!));
             },
           ),
           ...days.map((d) {
             final date = Trip.dateOnly(trip.startDate).add(Duration(days: d));
+            final sel = _day == d;
             return Padding(
               padding: const EdgeInsets.only(left: 8),
-              child: ChoiceChip(
-                avatar: CircleAvatar(backgroundColor: dayColor(d), radius: 7),
-                label: Text('J${d + 1} · ${dayShort(date)}'),
-                selected: _day == d,
-                onSelected: (_) {
-                  setState(() => _day = d);
-                  _fit(all.where((s) => s.day == d).map((s) => pos[s.number]!));
-                },
+              child: Material(
+                color: sel ? dayColor(d) : AppColors.of(context).fill,
+                shape: const StadiumBorder(),
+                child: InkWell(
+                  customBorder: const StadiumBorder(),
+                  onTap: () {
+                    setState(() => _day = d);
+                    _fit(all.where((s) => s.day == d).map((s) => pos[s.number]!));
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(color: sel ? Colors.white : dayColor(d), shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 7),
+                      Text('J${d + 1} · ${dayShort(date)}',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                              color: sel ? Colors.white : AppColors.of(context).label)),
+                    ]),
+                  ),
+                ),
               ),
             );
           }),
@@ -191,7 +230,7 @@ class _PlanScreenState extends State<PlanScreen> {
         height: 26,
         child: Transform.rotate(
           angle: atan2(dy, dx),
-          child: Icon(Icons.play_arrow_rounded, color: color, size: 26,
+          child: Icon(Icons.play_arrow_rounded, color: color, size: 24,
               shadows: const [Shadow(color: Colors.white, blurRadius: 3)]),
         ),
       ));
@@ -211,8 +250,8 @@ class _PlanScreenState extends State<PlanScreen> {
             decoration: BoxDecoration(
               color: dayColor(s.day),
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: sel ? 4 : 2.5),
-              boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
+              border: Border.all(color: Colors.white, width: sel ? 3.5 : 2.5),
+              boxShadow: const [BoxShadow(blurRadius: 6, color: Color(0x40000000), offset: Offset(0, 2))],
             ),
             alignment: Alignment.center,
             child: Text('${s.number}',
@@ -238,61 +277,100 @@ class _PlanScreenState extends State<PlanScreen> {
       ),
       children: [
         TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          subdomains: const ['a', 'b', 'c', 'd'],
+          retinaMode: MediaQuery.devicePixelRatioOf(context) > 1.5,
           userAgentPackageName: 'com.budgetvoyage.app',
         ),
         PolylineLayer(polylines: segments),
         MarkerLayer(markers: arrows),
         MarkerLayer(markers: markers),
-        const RichAttributionWidget(attributions: [TextSourceAttribution('© contributeurs OpenStreetMap')]),
+        const RichAttributionWidget(attributions: [
+          TextSourceAttribution('© contributeurs OpenStreetMap'),
+          TextSourceAttribution('© CARTO'),
+        ]),
       ],
     );
   }
 
   Widget _buildList(Trip trip, List<PlanStep> steps, Map<int, LatLng> pos) {
-    if (steps.isEmpty) return const Center(child: Text('Aucune étape pour ce jour.'));
-    final tt = Theme.of(context).textTheme;
+    final c = AppColors.of(context);
+    if (steps.isEmpty) return Center(child: Text('Aucune étape ce jour-là.', style: TextStyle(color: c.secondary)));
     final children = <Widget>[];
     int? lastDay;
     for (final s in steps) {
       if (s.day != lastDay) {
         lastDay = s.day;
         final date = Trip.dateOnly(trip.startDate).add(Duration(days: s.day));
-        children.add(Container(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
-          child: Row(children: [
-            Container(width: 6, height: 22, color: dayColor(s.day)),
+        children.add(Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 6),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+            Text('Jour ${s.day + 1}',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.5, color: dayColor(s.day))),
             const SizedBox(width: 8),
-            Expanded(
-              child: Text('Jour ${s.day + 1} · ${dayLong(date)}',
-                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-            ),
+            Expanded(child: Text(dayLong(date), style: TextStyle(fontSize: 15, color: c.secondary))),
           ]),
         ));
       }
       final key = _itemKeys.putIfAbsent(s.number, () => GlobalKey());
       final sel = s.number == _selected;
-      children.add(Material(
+      children.add(AnimatedContainer(
         key: key,
-        color: sel ? dayColor(s.day).withValues(alpha: 0.12) : Colors.transparent,
-        child: ListTile(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        decoration: BoxDecoration(
+          color: sel ? dayColor(s.day).withValues(alpha: 0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
           onTap: () => _selectFromList(s, pos[s.number]!),
-          leading: CircleAvatar(
-            backgroundColor: dayColor(s.day),
-            foregroundColor: Colors.white,
-            child: Text('${s.number}', style: const TextStyle(fontWeight: FontWeight.w800)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: dayColor(s.day), shape: BoxShape.circle),
+                child: Text('${s.number}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 46,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Text(hm(s.time), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                ),
+              ),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(children: [
+                      Icon(planIcon(s.kind), size: 15, color: c.secondary),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(s.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, letterSpacing: -0.2))),
+                    ]),
+                  ),
+                  if (s.subtitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(s.subtitle,
+                          maxLines: sel ? 12 : 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 13, color: c.secondary, height: 1.35)),
+                    ),
+                ]),
+              ),
+              if (s.cost != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 8),
+                  child: Text(s.cost == 0 ? 'Gratuit' : eur(s.cost!),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: s.cost == 0 ? c.green : c.label)),
+                ),
+            ]),
           ),
-          title: Row(children: [
-            Icon(planIcon(s.kind), size: 18),
-            const SizedBox(width: 6),
-            Expanded(child: Text(s.title, style: const TextStyle(fontWeight: FontWeight.w600))),
-          ]),
-          subtitle: Text(
-            '${hm(s.time)}${s.subtitle.isNotEmpty ? ' · ${s.subtitle}' : ''}',
-            maxLines: sel ? 12 : 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: s.cost == null ? null : Text(s.cost == 0 ? 'Gratuit' : eur(s.cost!)),
         ),
       ));
     }

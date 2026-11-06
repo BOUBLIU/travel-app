@@ -27,6 +27,20 @@ flutter build apk --release
 
 ## Fonctionnalités
 
+- **Interface épurée inspirée d'iOS** :
+  - fond gris clair et cartes blanches arrondies à ombre douce ;
+  - bleu système Apple, police Inter (licence OFL, incluse dans `assets/fonts`) et icônes Cupertino ;
+  - contrôles segmentés, listes groupées et bandeau en verre dépoli ;
+  - thème sombre automatique.
+- **Sans budget de départ** possible : l'app additionne alors le coût des choix sans rien bloquer,
+  et ce total sert de référence pendant le voyage.
+- **Transport au choix** : avion, train, car ou voiture (votre voiture, location ou covoiturage).
+  Les modes terrestres sont proposés quand la distance le permet. En train ou en car, l'arrivée
+  se fait à la gare ; en voiture, directement au logement.
+- **Hôtel déjà réservé** : saisissez le nom de l'hôtel et le prix payé (et l'adresse si vous le
+  souhaitez, pour la carte). Ce montant est déduit du budget et la liste d'hôtels est sautée pour
+  cette ville.
+
 - **Bandeau budget** sur chaque étape : budget initial, dépensé, restant et barre de progression.
   Une alerte s'affiche sous 10 % de budget restant.
   Les options trop chères sont grisées (« Hors budget »).
@@ -97,3 +111,9 @@ test/                         Tests de la logique budget et du parcours complet
 ```
 
 Lancer les tests : `flutter test`.
+
+Générer des captures d'écran du parcours (format Tab S11 Ultra, dans `screenshots/out/`) :
+`flutter test screenshots --update-goldens`.
+
+Le fond de carte vient de CARTO (style « Voyager », données OpenStreetMap). Il est gratuit pour un
+usage non commercial ; une licence sera nécessaire si l'app est monétisée.

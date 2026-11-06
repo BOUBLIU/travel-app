@@ -1,10 +1,21 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/models.dart';
 import '../../../state/planner.dart';
 import '../../format.dart';
+import '../../theme.dart';
 import '../../widgets/common.dart';
+
+IconData interestIcon(Interest i) => switch (i) {
+      Interest.culture => CupertinoIcons.building_2_fill,
+      Interest.nature => CupertinoIcons.tree,
+      Interest.nightlife => CupertinoIcons.moon_stars_fill,
+      Interest.food => Icons.restaurant_rounded,
+      Interest.shopping => CupertinoIcons.bag_fill,
+      Interest.sport => Icons.directions_bike_rounded,
+    };
 
 /// Étape 8 : envies, puis activités par ville placées à un jour et une heure.
 class ActivitiesStep extends StatefulWidget {
@@ -33,41 +44,55 @@ class _ActivitiesStepState extends State<ActivitiesStep> {
     if (!days.contains(day)) day = days.first;
     var time = existing != null ? TimeOfDay.fromDateTime(existing) : const TimeOfDay(hour: 10, minute: 0);
 
-    final ok = await showDialog<bool>(
+    final ok = await showModalBottomSheet<bool>(
       context: context,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (c) => StatefulBuilder(
-        builder: (c, setD) => AlertDialog(
-          title: Text(a.name),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Quand ?', style: Theme.of(c).textTheme.titleSmall),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<DateTime>(
-                initialValue: day,
-                decoration: const InputDecoration(labelText: 'Jour', border: OutlineInputBorder()),
-                items: days.map((d) => DropdownMenuItem(value: d, child: Text(dayLong(d)))).toList(),
-                onChanged: (v) => setD(() => day = v ?? day),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.schedule),
-                label: Text('Heure : ${time.format(c)}'),
-                onPressed: () async {
-                  final r = await showTimePicker(context: c, initialTime: time, helpText: 'Heure de début');
-                  if (r != null) setD(() => time = r);
-                },
-              ),
-              const SizedBox(height: 12),
-              Text(a.isFree ? 'Gratuit' : 'Coût : ${eur(a.totalPrice)} (${eur(a.pricePerPerson)} / pers.)'),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Annuler')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(existing == null ? 'Ajouter' : 'Modifier')),
-          ],
-        ),
+        builder: (c, setD) {
+          final col = AppColors.of(c);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(a.name, style: Theme.of(c).textTheme.headlineSmall),
+                const SizedBox(height: 4),
+                Text(a.isFree ? 'Gratuit' : '${eur(a.totalPrice)} · ${eur(a.pricePerPerson)} par personne',
+                    style: TextStyle(color: col.secondary)),
+                const GroupHeader('Jour'),
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: days
+                        .map((d) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Tag(label: dayShort(d), selected: d == day, onTap: () => setD(() => day = d)),
+                            ))
+                        .toList(),
+                  ),
+                ),
+                const GroupHeader('Heure'),
+                SizedBox(
+                  height: 150,
+                  child: CupertinoDatePicker(
+                    mode: CupertinoDatePickerMode.time,
+                    use24hFormat: true,
+                    minuteInterval: 5,
+                    initialDateTime: DateTime(2000, 1, 1, time.hour, time.minute - time.minute % 5),
+                    onDateTimeChanged: (d) => time = TimeOfDay.fromDateTime(d),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => Navigator.pop(c, true),
+                  child: Text(existing == null ? 'Ajouter au programme' : 'Modifier'),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
     if (ok == true) {
@@ -79,45 +104,46 @@ class _ActivitiesStepState extends State<ActivitiesStep> {
   Widget build(BuildContext context) {
     final p = context.watch<PlannerController>();
     final t = p.trip;
-    final tt = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
+    final c = AppColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionTitle('Vos envies',
-            subtitle: 'Choisissez ce qui vous plaît : les activités gratuites sont affichées en premier.'),
+        const SectionTitle('Vos envies', subtitle: 'Les activités gratuites apparaissent en premier.'),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: Interest.values
-              .map((i) => FilterChip(
-                    label: Text(i.label),
+              .map((i) => Tag(
+                    icon: interestIcon(i),
+                    label: i.label,
                     selected: t.interests.contains(i),
-                    onSelected: (_) => p.toggleInterest(i),
+                    onTap: () => p.toggleInterest(i),
                   ))
               .toList(),
         ),
         if (t.activities.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text('Au programme (${t.activities.length}) · ${eur(t.plannedFor(BudgetCategory.activities))}',
-              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-          ...t.activities.map((a) => ListTile(
-                dense: true,
-                leading: const Icon(Icons.event_available),
-                title: Text(a.name),
-                subtitle: Text('${a.city} · ${a.scheduledAt != null ? '${dayLong(a.scheduledAt!)} à ${hm(a.scheduledAt!)}' : 'à placer'}'),
-                trailing: Text(a.isFree ? 'Gratuit' : eur(a.totalPrice)),
-              )),
+          GroupHeader('Au programme (${t.activities.length})',
+              trailing: Text(eur(t.plannedFor(BudgetCategory.activities)),
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: c.secondary))),
+          GroupedList(
+            children: t.activities
+                .map((a) => GroupedRow(
+                      leading: IconTile(interestIcon(a.interest), c.accent, size: 30),
+                      title: a.name,
+                      subtitle: '${a.city} · ${a.scheduledAt != null ? '${dayLong(a.scheduledAt!)} à ${hm(a.scheduledAt!)}' : 'à placer'}',
+                      trailing: Text(a.isFree ? 'Gratuit' : eur(a.totalPrice),
+                          style: TextStyle(color: a.isFree ? c.green : c.label, fontWeight: FontWeight.w600)),
+                    ))
+                .toList(),
+          ),
         ],
         for (var i = 0; i < t.stays.length; i++) ...[
-          const SizedBox(height: 16),
-          Text('À ${t.stays[i].place.name}', style: tt.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
+          GroupHeader('Idées à ${t.stays[i].place.name}'),
           FutureBuilder<List<Activity>>(
             future: _load(p, t.stays[i].place),
             builder: (context, snap) {
               if (!snap.hasData) {
-                return const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()));
+                return const Padding(padding: EdgeInsets.all(24), child: Center(child: CupertinoActivityIndicator()));
               }
               return ResponsiveGrid(
                 minItemWidth: 380,
@@ -128,37 +154,41 @@ class _ActivitiesStepState extends State<ActivitiesStep> {
                     selected: added,
                     outOfBudget: !added && !p.fits(a.totalPrice),
                     onTap: () => _schedule(p, i, a),
-                    trailing: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        if (a.isFree)
-                          Chip(
-                            label: const Text('GRATUIT'),
-                            backgroundColor: Colors.green.shade100,
-                            labelStyle: TextStyle(color: Colors.green.shade900, fontWeight: FontWeight.w800),
-                            visualDensity: VisualDensity.compact,
-                          )
-                        else ...[
-                          Text(eur(a.totalPrice), style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                          Text('${eur(a.pricePerPerson)} / pers.', style: tt.bodySmall),
-                        ],
-                        if (added)
-                          TextButton(onPressed: () => p.removeActivity(a.id), child: const Text('Retirer')),
-                      ],
-                    ),
+                    trailing: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      if (a.isFree)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(color: c.green.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+                          child: Text('Gratuit', style: TextStyle(color: c.green, fontWeight: FontWeight.w700, fontSize: 13)),
+                        )
+                      else
+                        PriceLabel(eur(a.totalPrice), caption: '${eur(a.pricePerPerson)} / pers.'),
+                      if (added)
+                        TextButton(
+                          onPressed: () => p.removeActivity(a.id),
+                          style: TextButton.styleFrom(foregroundColor: c.red),
+                          child: const Text('Retirer'),
+                        ),
+                    ]),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(a.name, style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 2),
+                        Text(a.name, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600, letterSpacing: -0.3)),
+                        const SizedBox(height: 3),
                         Text('${a.interest.label} · ${duration(Duration(minutes: a.durationMin))}',
-                            style: tt.bodySmall?.copyWith(color: scheme.primary)),
-                        const SizedBox(height: 4),
-                        Text(a.description),
+                            style: TextStyle(fontSize: 13, color: c.accent, fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 6),
+                        Text(a.description, style: TextStyle(fontSize: 14, color: c.secondary, height: 1.35)),
                         if (scheduled != null) ...[
-                          const SizedBox(height: 6),
-                          Text('📅 ${dayLong(scheduled)} à ${hm(scheduled)}',
-                              style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            Icon(CupertinoIcons.calendar, size: 14, color: c.label),
+                            const SizedBox(width: 5),
+                            Flexible(
+                              child: Text('${dayLong(scheduled)} à ${hm(scheduled)}',
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                            ),
+                          ]),
                         ],
                       ],
                     ),

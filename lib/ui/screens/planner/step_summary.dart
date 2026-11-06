@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,8 +6,20 @@ import '../../../models/models.dart';
 import '../../../state/app_state.dart';
 import '../../../state/planner.dart';
 import '../../format.dart';
+import '../../theme.dart';
 import '../../widgets/common.dart';
 import '../plan_screen.dart';
+import 'step_flight.dart';
+
+(IconData, Color) categoryLook(AppColors c, BudgetCategory cat) => switch (cat) {
+      BudgetCategory.flight => (CupertinoIcons.airplane, c.accent),
+      BudgetCategory.transfer => (CupertinoIcons.arrow_right_arrow_left, const Color(0xFF5AC8FA)),
+      BudgetCategory.hotel => (CupertinoIcons.bed_double_fill, const Color(0xFF5856D6)),
+      BudgetCategory.meals => (Icons.restaurant_rounded, c.orange),
+      BudgetCategory.activities => (CupertinoIcons.ticket_fill, const Color(0xFFFF2D55)),
+      BudgetCategory.localTransport => (CupertinoIcons.tram_fill, c.green),
+      BudgetCategory.intercity => (CupertinoIcons.train_style_one, const Color(0xFFAF52DE)),
+    };
 
 /// Étape 10 : récapitulatif et enregistrement.
 class SummaryStep extends StatefulWidget {
@@ -46,11 +59,83 @@ class _SummaryStepState extends State<SummaryStep> {
   Widget build(BuildContext context) {
     final p = context.watch<PlannerController>();
     final t = p.trip;
-    final tt = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
+    final c = AppColors.of(context);
     final lines = t.budgetLines;
-    final cats = BudgetCategory.values.where((c) => lines.any((l) => l.category == c)).toList();
-    final over = p.remaining < 0;
+    final cats = BudgetCategory.values.where((cat) => lines.any((l) => l.category == cat)).toList();
+    final over = p.hasBudget && p.remaining < 0;
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+
+    final total = SurfaceCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Total prévu', style: TextStyle(color: c.secondary, fontSize: 14, fontWeight: FontWeight.w500)),
+        Text(eur(t.plannedTotal), style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w700, letterSpacing: -1.6)),
+        const SizedBox(height: 16),
+        if (p.hasBudget) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: p.progress,
+              minHeight: 8,
+              color: over ? c.red : (p.lowBudget ? c.orange : c.accent),
+              backgroundColor: c.fill,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _Row('Budget', eur(t.budget)),
+          _Row(over ? 'Dépassement' : 'Marge restante', eur(p.remaining.abs()),
+              color: over ? c.red : c.green, bold: true),
+        ] else
+          Text('Voyage planifié sans budget de départ. Ce total servira de référence pendant le séjour.',
+              style: TextStyle(color: c.secondary, fontSize: 14)),
+        const SizedBox(height: 18),
+        TextField(
+          controller: _name,
+          decoration: InputDecoration(
+            labelText: 'Nom du voyage',
+            filled: true,
+            fillColor: c.background,
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 56)),
+            onPressed: _saving ? null : _save,
+            icon: const Icon(CupertinoIcons.checkmark_alt, size: 20),
+            label: const Text('Enregistrer le voyage', style: TextStyle(fontSize: 17)),
+          ),
+        ),
+      ]),
+    );
+
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: cats.map((cat) {
+        final items = lines.where((l) => l.category == cat).toList();
+        var (icon, color) = categoryLook(c, cat);
+        if (cat == BudgetCategory.flight) {
+          icon = travelModeIcon(t.travelMode);
+          color = travelModeColor(c, t.travelMode);
+        }
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          GroupHeader(cat.label,
+              trailing: Text(eur(t.plannedFor(cat)),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.label))),
+          GroupedList(
+            children: items
+                .map((l) => GroupedRow(
+                      leading: IconTile(icon, color, size: 28),
+                      title: l.label,
+                      trailing: Text(l.amount == 0 ? 'Gratuit' : eur(l.amount),
+                          style: TextStyle(fontWeight: FontWeight.w500, color: l.amount == 0 ? c.green : c.label)),
+                    ))
+                .toList(),
+          ),
+        ]);
+      }).toList(),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -58,78 +143,34 @@ class _SummaryStepState extends State<SummaryStep> {
         SectionTitle('Récapitulatif',
             subtitle: '${t.destination!.name} · ${dateFr(t.startDate)} → ${dateFr(t.endDate)} · '
                 '${t.travelers} voyageur${t.travelers > 1 ? 's' : ''}'),
-        TextField(
-          controller: _name,
-          decoration: const InputDecoration(labelText: 'Nom du voyage', border: OutlineInputBorder()),
-        ),
-        const SizedBox(height: 16),
-        ResponsiveGrid(
-          minItemWidth: 460,
-          children: cats.map((c) {
-            final items = lines.where((l) => l.category == c).toList();
-            return Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Expanded(child: Text(c.label, style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800))),
-                      Text(eur(t.plannedFor(c)), style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    ]),
-                    const Divider(),
-                    ...items.map((l) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(children: [
-                            Expanded(child: Text(l.label)),
-                            Text(l.amount == 0 ? 'Gratuit' : eur(l.amount)),
-                          ]),
-                        )),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          color: over ? scheme.errorContainer : scheme.primaryContainer,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(children: [
-              _TotalRow('Budget', eur(t.budget)),
-              _TotalRow('Total prévu', eur(t.plannedTotal), bold: true),
-              const Divider(),
-              _TotalRow(over ? 'Dépassement' : 'Budget restant (marge)', eur(p.remaining.abs()), bold: true, big: true),
-            ]),
-          ),
-        ),
-        const SizedBox(height: 20),
-        FilledButton.icon(
-          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 18)),
-          onPressed: _saving ? null : _save,
-          icon: const Icon(Icons.save_outlined),
-          label: const Text('Enregistrer', style: TextStyle(fontSize: 18)),
-        ),
+        if (wide)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(flex: 3, child: details),
+            const SizedBox(width: 24),
+            Expanded(flex: 2, child: Padding(padding: const EdgeInsets.only(top: 20), child: total)),
+          ])
+        else ...[
+          total,
+          details,
+        ],
       ],
     );
   }
 }
 
-class _TotalRow extends StatelessWidget {
+class _Row extends StatelessWidget {
   final String label;
   final String value;
+  final Color? color;
   final bool bold;
-  final bool big;
-  const _TotalRow(this.label, this.value, {this.bold = false, this.big = false});
+  const _Row(this.label, this.value, {this.color, this.bold = false});
 
   @override
-  Widget build(BuildContext context) {
-    final style = (big ? Theme.of(context).textTheme.titleLarge : Theme.of(context).textTheme.titleMedium)
-        ?.copyWith(fontWeight: bold ? FontWeight.w800 : FontWeight.w500);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(children: [Expanded(child: Text(label, style: style)), Text(value, style: style)]),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(children: [
+          Expanded(child: Text(label, style: TextStyle(fontSize: 15, color: AppColors.of(context).secondary))),
+          Text(value, style: TextStyle(fontSize: 16, fontWeight: bold ? FontWeight.w700 : FontWeight.w500, color: color)),
+        ]),
+      );
 }

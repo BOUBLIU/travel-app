@@ -32,6 +32,10 @@ class Place {
   double get airportLat => lat + 0.12;
   double get airportLng => lng + 0.15;
 
+  /// Position approximative de la gare principale.
+  double get stationLat => lat + 0.006;
+  double get stationLng => lng - 0.008;
+
   Map<String, dynamic> toJson() => {
         'name': name,
         'country': country,
@@ -65,8 +69,40 @@ class Place {
   static double _rad(double d) => d * pi / 180;
 }
 
+/// Moyen de transport pour se rendre à destination.
+enum TravelMode { plane, train, bus, car }
+
+extension TravelModeX on TravelMode {
+  String get label => switch (this) {
+        TravelMode.plane => 'Avion',
+        TravelMode.train => 'Train',
+        TravelMode.bus => 'Car',
+        TravelMode.car => 'Voiture',
+      };
+
+  /// Nom du trajet (« le vol », « le train »…).
+  String get tripNoun => switch (this) {
+        TravelMode.plane => 'vol',
+        TravelMode.train => 'train',
+        TravelMode.bus => 'car',
+        TravelMode.car => 'trajet',
+      };
+
+  /// Lieu d'arrivée en ville.
+  String get hubName => switch (this) {
+        TravelMode.plane => 'l\'aéroport',
+        TravelMode.train => 'la gare',
+        TravelMode.bus => 'la gare routière',
+        TravelMode.car => 'votre logement',
+      };
+
+  bool get needsTransfer => this != TravelMode.car;
+}
+
+/// Option de transport aller-retour (vol, train, car ou voiture).
 class FlightOption {
   final String id;
+  final TravelMode mode;
   final String airline;
   final String flightNumber;
   final String fromCode;
@@ -83,6 +119,7 @@ class FlightOption {
 
   FlightOption({
     required this.id,
+    this.mode = TravelMode.plane,
     required this.airline,
     required this.flightNumber,
     required this.fromCode,
@@ -104,6 +141,7 @@ class FlightOption {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'mode': mode.name,
         'airline': airline,
         'flightNumber': flightNumber,
         'fromCode': fromCode,
@@ -121,6 +159,7 @@ class FlightOption {
 
   factory FlightOption.fromJson(Map<String, dynamic> j) => FlightOption(
         id: j['id'].toString(),
+        mode: TravelMode.values.asNameMap()[j['mode']] ?? TravelMode.plane,
         airline: j['airline'] ?? '',
         flightNumber: j['flightNumber'] ?? '',
         fromCode: j['fromCode'] ?? '',
@@ -147,13 +186,14 @@ class TransferStep {
       TransferStep(DateTime.parse(j['time']), j['description']);
 }
 
-enum TransferMode { train, bus, taxi }
+enum TransferMode { train, bus, taxi, walk }
 
 extension TransferModeX on TransferMode {
   String get label => switch (this) {
         TransferMode.train => 'Train',
         TransferMode.bus => 'Bus',
         TransferMode.taxi => 'Taxi',
+        TransferMode.walk => 'À pied',
       };
 }
 
@@ -282,12 +322,16 @@ class CityStay {
   PriceRange priceRange;
   HotelOption? hotel;
 
+  /// L'utilisateur a réservé son hôtel avant d'utiliser l'application.
+  bool alreadyBooked;
+
   CityStay({
     required this.place,
     required this.nights,
     this.priority = HotelPriority.cheapest,
     this.priceRange = PriceRange.any,
     this.hotel,
+    this.alreadyBooked = false,
   });
 
   double get hotelCost => (hotel?.pricePerNight ?? 0) * nights;
@@ -298,6 +342,7 @@ class CityStay {
         'priority': priority.name,
         'priceRange': priceRange.name,
         'hotel': hotel?.toJson(),
+        'alreadyBooked': alreadyBooked,
       };
 
   factory CityStay.fromJson(Map<String, dynamic> j) => CityStay(
@@ -306,6 +351,7 @@ class CityStay {
         priority: HotelPriority.values.byName(j['priority'] ?? 'cheapest'),
         priceRange: PriceRange.values.byName(j['priceRange'] ?? 'any'),
         hotel: j['hotel'] == null ? null : HotelOption.fromJson(j['hotel']),
+        alreadyBooked: j['alreadyBooked'] ?? false,
       );
 }
 
@@ -423,13 +469,14 @@ class Activity {
       );
 }
 
-enum LocalTransportMode { publicPass, carRental, taxi }
+enum LocalTransportMode { publicPass, carRental, taxi, ownCar }
 
 extension LocalTransportModeX on LocalTransportMode {
   String get label => switch (this) {
         LocalTransportMode.publicPass => 'Transports en commun / pass',
         LocalTransportMode.carRental => 'Location de voiture',
         LocalTransportMode.taxi => 'Taxi / VTC',
+        LocalTransportMode.ownCar => 'Votre voiture',
       };
 }
 
@@ -500,8 +547,8 @@ enum BudgetCategory { flight, transfer, hotel, meals, activities, localTransport
 
 extension BudgetCategoryX on BudgetCategory {
   String get label => switch (this) {
-        BudgetCategory.flight => 'Vol',
-        BudgetCategory.transfer => 'Trajets aéroport',
+        BudgetCategory.flight => 'Transport aller-retour',
+        BudgetCategory.transfer => 'Trajets d\'arrivée et de départ',
         BudgetCategory.hotel => 'Logement',
         BudgetCategory.meals => 'Repas',
         BudgetCategory.activities => 'Activités',
@@ -592,6 +639,10 @@ class Trip {
   int travelers;
   double budget;
 
+  /// false : l'utilisateur planifie sans budget de départ.
+  bool hasBudget;
+  TravelMode travelMode;
+
   FlightOption? flight;
   TransferOption? arrivalTransfer;
   TransferOption? departureTransfer;
@@ -616,6 +667,8 @@ class Trip {
     required this.endDate,
     this.travelers = 1,
     this.budget = 0,
+    this.hasBudget = true,
+    this.travelMode = TravelMode.plane,
     this.flight,
     this.arrivalTransfer,
     this.departureTransfer,
@@ -666,20 +719,21 @@ class Trip {
     final lines = <BudgetLine>[];
     if (flight != null) {
       lines.add(BudgetLine(BudgetCategory.flight,
-          '${flight!.airline} ${flight!.fromCode} ⇄ ${flight!.toCode}', flight!.totalPrice));
+          '${flight!.mode.label} · ${flight!.airline} · ${flight!.fromCode} – ${flight!.toCode}', flight!.totalPrice));
     }
     if (arrivalTransfer != null) {
-      lines.add(BudgetLine(BudgetCategory.transfer, 'Aéroport → ville (${arrivalTransfer!.label})',
+      lines.add(BudgetLine(BudgetCategory.transfer, 'Arrivée → ville (${arrivalTransfer!.label})',
           arrivalTransfer!.price));
     }
     if (departureTransfer != null) {
-      lines.add(BudgetLine(BudgetCategory.transfer, 'Ville → aéroport (${departureTransfer!.label})',
+      lines.add(BudgetLine(BudgetCategory.transfer, 'Ville → départ (${departureTransfer!.label})',
           departureTransfer!.price));
     }
     for (final s in stays) {
       if (s.hotel != null) {
         lines.add(BudgetLine(BudgetCategory.hotel,
-            '${s.hotel!.name} (${s.place.name}, ${s.nights} nuit${s.nights > 1 ? 's' : ''})', s.hotelCost));
+            '${s.hotel!.name} (${s.place.name}, ${s.nights} nuit${s.nights > 1 ? 's' : ''}'
+            '${s.alreadyBooked ? ', déjà réservé' : ''})', s.hotelCost));
       }
     }
     if (mealProfile != null) {
@@ -698,7 +752,10 @@ class Trip {
   }
 
   double get plannedTotal => budgetLines.fold(0.0, (a, l) => a + l.amount);
-  double get plannedRemaining => budget - plannedTotal;
+
+  /// Budget de référence : le budget saisi, ou le total prévu si l'utilisateur n'en a pas fixé.
+  double get effectiveBudget => hasBudget ? budget : plannedTotal;
+  double get plannedRemaining => effectiveBudget - plannedTotal;
 
   double plannedFor(BudgetCategory c) =>
       budgetLines.where((l) => l.category == c).fold(0.0, (a, l) => a + l.amount);
@@ -712,6 +769,8 @@ class Trip {
         'endDate': endDate.toIso8601String(),
         'travelers': travelers,
         'budget': budget,
+        'hasBudget': hasBudget,
+        'travelMode': travelMode.name,
         'flight': flight?.toJson(),
         'arrivalTransfer': arrivalTransfer?.toJson(),
         'departureTransfer': departureTransfer?.toJson(),
@@ -736,6 +795,8 @@ class Trip {
         endDate: DateTime.parse(j['endDate']),
         travelers: j['travelers'] ?? 1,
         budget: _d(j['budget']),
+        hasBudget: j['hasBudget'] ?? true,
+        travelMode: TravelMode.values.asNameMap()[j['travelMode']] ?? TravelMode.plane,
         flight: j['flight'] == null ? null : FlightOption.fromJson(j['flight']),
         arrivalTransfer:
             j['arrivalTransfer'] == null ? null : TransferOption.fromJson(j['arrivalTransfer']),

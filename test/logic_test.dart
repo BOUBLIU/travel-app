@@ -19,6 +19,7 @@ Future<PlannerController> _planner({bool multi = false}) async {
     end: DateTime(2027, 4, 8),
     travelers: 2,
     budget: 5000,
+    hasBudget: true,
   );
   if (multi) {
     p.setStays(true, [
@@ -145,6 +146,73 @@ void main() {
     expect(copy.plannedTotal, p.trip.plannedTotal);
     expect(copy.stays.length, 2);
     expect(copy.mealProfile, MealProfile.gourmet);
+  });
+
+  test('sans budget : rien n\'est hors budget, le total sert de référence', () async {
+    final p = PlannerController(SimulatedTravelData());
+    p.setBasics(
+      origin: PlaceService.findLocal('Paris')!,
+      destination: PlaceService.findLocal('Rome')!,
+      start: DateTime(2027, 5, 1),
+      end: DateTime(2027, 5, 5),
+      travelers: 1,
+      budget: 0,
+      hasBudget: false,
+    );
+    p.setMealProfile(MealProfile.gourmet);
+    expect(p.fits(1e9), isTrue);
+    expect(p.lowBudget, isFalse);
+    expect(p.trip.effectiveBudget, p.trip.plannedTotal);
+    final tr = TripTracker(p.trip, now: DateTime(2027, 5, 2));
+    expect(tr.remaining, closeTo(p.trip.plannedTotal, 0.01)); // repas = enveloppe, rien de dépensé
+    expect(tr.crossedThresholds, isEmpty);
+  });
+
+  test('train, car et voiture : disponibles en Europe, pas pour un long-courrier', () async {
+    final d = SimulatedTravelData();
+    final paris = PlaceService.findLocal('Paris')!;
+    final rome = PlaceService.findLocal('Rome')!;
+    final ny = PlaceService.findLocal('New York')!;
+    for (final m in [TravelMode.train, TravelMode.bus, TravelMode.car]) {
+      final ok = await d.searchGroundTransport(
+          mode: m, origin: paris, destination: rome, departDate: DateTime(2027, 5, 1), returnDate: DateTime(2027, 5, 5), travelers: 2);
+      expect(ok, isNotEmpty, reason: m.name);
+      expect(ok.every((f) => f.mode == m && f.totalPrice > 0), isTrue);
+      final none = await d.searchGroundTransport(
+          mode: m, origin: paris, destination: ny, departDate: DateTime(2027, 5, 1), returnDate: DateTime(2027, 5, 5), travelers: 2);
+      expect(none, isEmpty, reason: m.name);
+    }
+  });
+
+  test('voyage en train : le plan arrive à la gare', () async {
+    final p = PlannerController(SimulatedTravelData());
+    final lyon = PlaceService.findLocal('Lyon')!;
+    p.setBasics(
+        origin: PlaceService.findLocal('Paris')!, destination: lyon, start: DateTime(2027, 5, 1), end: DateTime(2027, 5, 3),
+        travelers: 2, budget: 800, hasBudget: true);
+    p.setTravelMode(TravelMode.train);
+    final trains = await p.data.searchGroundTransport(
+        mode: TravelMode.train, origin: p.trip.origin!, destination: lyon,
+        departDate: p.trip.startDate, returnDate: p.trip.endDate, travelers: 2);
+    p.setFlight(trains.first);
+    final plan = buildPlan(p.trip);
+    expect(plan.first.title, startsWith('Arrivée du train'));
+    expect(plan.first.lat, closeTo(lyon.stationLat, 1e-9));
+  });
+
+  test('hôtel déjà réservé : prix payé déduit, nom conservé', () async {
+    final p = await _planner();
+    p.setAlreadyBooked(0, true);
+    p.setOwnHotel(0, name: 'Hôtel Sakura', totalPaid: 700, address: '', lat: 35.7, lng: 139.7);
+    expect(p.trip.stays[0].alreadyBooked, isTrue);
+    expect(p.trip.stays[0].hotel!.name, 'Hôtel Sakura');
+    expect(p.spent, closeTo(700, 0.001));
+    final copy = Trip.fromJson(p.trip.toJson());
+    expect(copy.stays[0].alreadyBooked, isTrue);
+    expect(copy.plannedTotal, closeTo(700, 0.001));
+    p.setAlreadyBooked(0, false);
+    expect(p.trip.stays[0].hotel, isNull);
+    expect(p.spent, 0);
   });
 
   test('autocomplétion insensible aux accents', () {

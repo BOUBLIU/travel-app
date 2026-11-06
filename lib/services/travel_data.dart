@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../models/models.dart';
+import 'places.dart';
 
 /// URL du petit serveur qui appelle les API (SerpApi, Google Maps…).
 /// À fournir au build : `flutter build apk --dart-define=API_BASE_URL=https://…`
@@ -28,6 +29,25 @@ abstract class TravelDataSource {
     required DateTime start,
     required bool toAirport,
     required int travelers,
+  });
+
+  /// Train, car ou voiture. Liste vide si la distance est trop grande.
+  Future<List<FlightOption>> searchGroundTransport({
+    required TravelMode mode,
+    required Place origin,
+    required Place destination,
+    required DateTime departDate,
+    required DateTime returnDate,
+    required int travelers,
+  });
+
+  /// Trajets gare ↔ centre-ville (train ou car).
+  Future<List<TransferOption>> stationTransfers({
+    required Place city,
+    required DateTime start,
+    required bool toStation,
+    required int travelers,
+    required TravelMode mode,
   });
 
   Future<List<HotelOption>> searchHotels({
@@ -219,6 +239,203 @@ class SimulatedTravelData implements TravelDataSource {
         label: 'Taxi',
         steps: build(taxi),
         price: _round(55 * ci * cars),
+        mapsUrl: maps('driving'),
+      ),
+    ];
+  }
+
+
+  /// Distance maximale réaliste par voie terrestre.
+  static double maxKm(TravelMode m) => switch (m) {
+        TravelMode.plane => double.infinity,
+        TravelMode.train => 2200,
+        TravelMode.bus => 2600,
+        TravelMode.car => 2600,
+      };
+
+  /// Ville du catalogue située à peu près à mi-chemin (pour les correspondances).
+  static String? _midway(Place a, Place b) {
+    final km = a.distanceTo(b);
+    String? best;
+    var bestScore = double.infinity;
+    for (final p in kPlaces) {
+      if (p.name == a.name || p.name == b.name) continue;
+      final d1 = a.distanceTo(p), d2 = p.distanceTo(b);
+      final detour = d1 + d2 - km;
+      if (detour > km * 0.2 || d1 < km * 0.3 || d2 < km * 0.3) continue;
+      if (detour < bestScore) {
+        bestScore = detour;
+        best = p.name;
+      }
+    }
+    return best;
+  }
+
+  @override
+  Future<List<FlightOption>> searchGroundTransport({
+    required TravelMode mode,
+    required Place origin,
+    required Place destination,
+    required DateTime departDate,
+    required DateTime returnDate,
+    required int travelers,
+  }) async {
+    await Future.delayed(const Duration(milliseconds: 350));
+    final crow = origin.distanceTo(destination);
+    if (crow > maxKm(mode) || crow < 5) return [];
+    final r = _rng([origin.name, destination.name, mode.name, _fmtDate.format(departDate)]);
+    final km = crow * (mode == TravelMode.train ? 1.2 : 1.3); // distance réelle par la route / le rail
+    final mid = _midway(origin, destination);
+    final from = origin.name, to = destination.name;
+    final ci = (origin.costIndex + destination.costIndex) / 2;
+    final list = <FlightOption>[];
+
+    FlightOption make(int i, String operator, String number, double kmh, double pricePP, int stops,
+        {int? hour, String? url, bool perGroup = false}) {
+      final minutes = (km / kmh * 60 + 20 + stops * 35).round();
+      final dep = DateTime(departDate.year, departDate.month, departDate.day, hour ?? (6 + r.nextInt(13)), r.nextInt(12) * 5);
+      final retDep = DateTime(returnDate.year, returnDate.month, returnDate.day, hour ?? (9 + r.nextInt(10)), r.nextInt(12) * 5);
+      final via = stops > 0 && mid != null ? [mid] : <String>[];
+      final total = perGroup ? pricePP : pricePP * travelers;
+      return FlightOption(
+        id: '${mode.name}$i',
+        mode: mode,
+        airline: operator,
+        flightNumber: number,
+        fromCode: from,
+        toCode: to,
+        outDepart: dep,
+        outArrive: dep.add(Duration(minutes: minutes)),
+        outStops: via,
+        retDepart: retDep,
+        retArrive: retDep.add(Duration(minutes: minutes)),
+        retStops: via,
+        pricePerPerson: perGroup ? (pricePP / travelers).roundToDouble() : pricePP,
+        totalPrice: _round(total),
+        bookingUrl: url ??
+            Uri.https('www.thetrainline.com', '/fr', {
+              'origin': from,
+              'destination': to,
+              'outwardDate': _fmtDate.format(departDate),
+              'inwardDate': _fmtDate.format(returnDate),
+            }).toString(),
+      );
+    }
+
+    switch (mode) {
+      case TravelMode.train:
+        final ops = _trainOperators(origin, destination);
+        for (var i = 0; i < 6; i++) {
+          final op = ops[r.nextInt(ops.length)];
+          final stops = km < 500 ? (r.nextDouble() < 0.7 ? 0 : 1) : (r.nextDouble() < 0.4 ? 0 : 1 + r.nextInt(2));
+          final low = op.$1.contains('Ouigo') || op.$1.contains('Avlo') || op.$1.contains('Iryo');
+          final kmh = km > 300 ? 190.0 : 110.0;
+          final pp = ((18 + km * (low ? 0.06 : 0.11)) * ci * (0.7 + r.nextDouble() * 0.7) * 2).roundToDouble();
+          list.add(make(i, op.$1, '${op.$2} ${1000 + r.nextInt(8999)}', kmh, pp, stops));
+        }
+      case TravelMode.bus:
+        const ops = [('FlixBus', 'N'), ('BlaBlaCar Bus', 'B'), ('Alsa', 'A'), ('Eurolines', 'E')];
+        for (var i = 0; i < 5; i++) {
+          final op = ops[r.nextInt(ops.length)];
+          final stops = km < 400 ? 0 : 1 + r.nextInt(2);
+          final pp = ((7 + km * 0.045) * (0.7 + r.nextDouble() * 0.6) * 2).roundToDouble();
+          list.add(make(i, op.$1, '${op.$2}${100 + r.nextInt(899)}', 72, pp, stops,
+              url: Uri.https('www.flixbus.fr', '/recherche', {
+                'departureCity': from,
+                'arrivalCity': to,
+                'rideDate': DateFormat('dd.MM.yyyy').format(departDate),
+              }).toString()));
+        }
+      case TravelMode.car:
+        final cars = (travelers / 5).ceil();
+        final fuel = km * 2 * 0.075; // ≈ 5,5 L/100 km à 1,80 €/L, aller-retour
+        final tolls = km * 2 * 0.055;
+        final maps = Uri.https('www.google.com', '/maps/dir/', {'api': '1', 'origin': from, 'destination': to, 'travelmode': 'driving'}).toString();
+        list.add(make(0, 'Votre voiture', 'Carburant + péages', 95, (fuel + tolls) * cars, 0, hour: 8, url: maps, perGroup: true));
+        list.add(make(1, 'Votre voiture (sans autoroute)', 'Carburant uniquement', 70, fuel * 1.1 * cars, 0, hour: 7, url: maps, perGroup: true));
+        list.add(make(2, 'Location de voiture', 'Location + carburant + péages', 95,
+            (fuel + tolls + 55 * ci * (returnDate.difference(departDate).inDays + 1)) * cars, 0,
+            hour: 9, perGroup: true,
+            url: Uri.https('www.rentalcars.com', '/fr/', {'location': from}).toString()));
+        list.add(make(3, 'Covoiturage BlaBlaCar', 'Places réservées', 88, (km * 0.065 * 2).roundToDouble(), 0,
+            url: Uri.https('www.blablacar.fr', '/search', {'fn': from, 'tn': to, 'db': _fmtDate.format(departDate)}).toString()));
+      case TravelMode.plane:
+        break;
+    }
+    list.sort((a, b) => a.totalPrice.compareTo(b.totalPrice));
+    return list;
+  }
+
+  static List<(String, String)> _trainOperators(Place a, Place b) {
+    final countries = {a.country, b.country};
+    final ops = <(String, String)>[];
+    if (countries.contains('France')) ops.addAll([('SNCF TGV inOui', 'TGV'), ('Ouigo', 'OUIGO')]);
+    if (countries.contains('Royaume-Uni') || countries.contains('Belgique') || countries.contains('Pays-Bas')) {
+      ops.add(('Eurostar', 'EST'));
+    }
+    if (countries.contains('Italie')) ops.addAll([('Trenitalia Frecciarossa', 'FR'), ('Italo', 'ITA')]);
+    if (countries.contains('Espagne')) ops.addAll([('Renfe AVE', 'AVE'), ('Iryo', 'IRYO')]);
+    if (countries.contains('Allemagne') || countries.contains('Autriche')) ops.add(('Deutsche Bahn ICE', 'ICE'));
+    if (countries.contains('Suisse')) ops.add(('TGV Lyria', 'LYR'));
+    if (countries.contains('Japon')) ops.add(('JR Shinkansen', 'JR'));
+    if (ops.isEmpty) ops.addAll([('Train grandes lignes', 'IC'), ('Train express', 'EX')]);
+    return ops;
+  }
+
+  @override
+  Future<List<TransferOption>> stationTransfers({
+    required Place city,
+    required DateTime start,
+    required bool toStation,
+    required int travelers,
+    required TravelMode mode,
+  }) async {
+    await Future.delayed(const Duration(milliseconds: 200));
+    final ci = city.costIndex;
+    final station = mode == TravelMode.bus ? 'Gare routière de ${city.name}' : 'Gare de ${city.name}';
+    final center = 'Centre de ${city.name}';
+    String maps(String m) => Uri.https('www.google.com', '/maps/dir/', {
+          'api': '1',
+          'origin': toStation ? '${city.name} centre' : station,
+          'destination': toStation ? station : '${city.name} centre',
+          'travelmode': m,
+        }).toString();
+    List<TransferStep> build(List<(int, String)> raw) {
+      final total = raw.last.$1;
+      final t0 = toStation ? start.subtract(Duration(minutes: total)) : start;
+      return raw.map((e) => TransferStep(t0.add(Duration(minutes: e.$1)), e.$2)).toList();
+    }
+
+    final cars = (travelers / 4).ceil();
+    return [
+      TransferOption(
+        id: 'metro',
+        mode: TransferMode.train,
+        label: 'Métro / tram',
+        steps: build(toStation
+            ? [(0, 'Départ du logement'), (8, 'Métro vers la gare'), (28, 'Arrivée — $station')]
+            : [(0, 'Arrivée — $station'), (10, 'Métro ou tram vers le centre'), (30, 'Arrivée — $center')]),
+        price: _round(2.2 * ci * travelers),
+        mapsUrl: maps('transit'),
+      ),
+      TransferOption(
+        id: 'walk',
+        mode: TransferMode.walk,
+        label: 'À pied',
+        steps: build(toStation
+            ? [(0, 'Départ du logement à pied'), (30, 'Arrivée — $station')]
+            : [(0, 'Arrivée — $station'), (30, 'Arrivée à pied — $center')]),
+        price: 0,
+        mapsUrl: maps('walking'),
+      ),
+      TransferOption(
+        id: 'taxi',
+        mode: TransferMode.taxi,
+        label: 'Taxi',
+        steps: build(toStation
+            ? [(0, 'Prise en charge au logement'), (20, 'Dépose — $station')]
+            : [(0, 'Arrivée — $station'), (8, 'Station de taxis'), (25, 'Dépose — $center')]),
+        price: _round(18 * ci * cars),
         mapsUrl: maps('driving'),
       ),
     ];
@@ -567,6 +784,31 @@ class ApiTravelData implements TravelDataSource {
     }
     return data.map((e) => TransferOption.fromJson(e)).toList();
   }
+
+
+  @override
+  Future<List<FlightOption>> searchGroundTransport({
+    required TravelMode mode,
+    required Place origin,
+    required Place destination,
+    required DateTime departDate,
+    required DateTime returnDate,
+    required int travelers,
+  }) {
+    _lastCallSimulated = true;
+    return _fallback.searchGroundTransport(
+        mode: mode, origin: origin, destination: destination, departDate: departDate, returnDate: returnDate, travelers: travelers);
+  }
+
+  @override
+  Future<List<TransferOption>> stationTransfers({
+    required Place city,
+    required DateTime start,
+    required bool toStation,
+    required int travelers,
+    required TravelMode mode,
+  }) =>
+      _fallback.stationTransfers(city: city, start: start, toStation: toStation, travelers: travelers, mode: mode);
 
   @override
   Future<List<Activity>> activities({

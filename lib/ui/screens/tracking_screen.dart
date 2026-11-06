@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +6,7 @@ import '../../models/models.dart';
 import '../../services/tracking.dart';
 import '../../state/app_state.dart';
 import '../format.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import 'quick_expense.dart';
 
@@ -13,18 +15,16 @@ class TrackingScreen extends StatelessWidget {
   final String tripId;
   const TrackingScreen({super.key, required this.tripId});
 
-  Future<void> _add(BuildContext context, Trip trip, [ExpenseCategory? c]) async {
+  Future<void> _add(BuildContext context, Trip trip, [ExpenseCategory? cat]) async {
     final app = context.read<AppState>();
     final messenger = ScaffoldMessenger.of(context);
-    final errorColor = Theme.of(context).colorScheme.error;
-    final e = await showQuickExpense(context, trip, category: c);
+    final e = await showQuickExpense(context, trip, category: cat);
     if (e == null) return;
     final alerts = await app.addExpense(trip, e);
     messenger.showSnackBar(SnackBar(
       content: Text(alerts.isEmpty
-          ? '${e.category.label} : ${eur(e.amountEur, cents: true)} ajouté'
-          : '⚠️ ${alerts.map((a) => a.title).join(' · ')}'),
-      backgroundColor: alerts.isEmpty ? null : errorColor,
+          ? '${e.category.label} · ${eur(e.amountEur, cents: true)} ajouté'
+          : alerts.map((a) => a.title).join(' · ')),
     ));
   }
 
@@ -34,19 +34,38 @@ class TrackingScreen extends StatelessWidget {
     final trip = app.tripById(tripId);
     if (trip == null) return const Scaffold(body: Center(child: Text('Voyage introuvable.')));
     final tr = TripTracker(trip);
+    final c = AppColors.of(context);
     final wide = MediaQuery.sizeOf(context).width >= 900;
-    final tt = Theme.of(context).textTheme;
+    final ref = trip.effectiveBudget;
+    final low = tr.remaining < ref * 0.1;
 
-    final figures = ResponsiveGrid(minItemWidth: 240, children: [
-      _Figure('Budget restant', eur(tr.remaining), Icons.account_balance_wallet_outlined,
-          danger: tr.remaining < trip.budget * 0.1),
-      _Figure('Disponible aujourd\'hui', eur(tr.availableToday), Icons.today_outlined,
-          danger: tr.availableToday < 0),
-      _Figure('Budget par jour', eur(tr.dailyBudget), Icons.calendar_view_day_outlined,
-          sub: '${eur(tr.remaining + tr.spentToday)} ÷ ${tr.remainingDays} jour${tr.remainingDays > 1 ? 's' : ''} restant${tr.remainingDays > 1 ? 's' : ''}'),
-      _Figure('Dépensé sur place', eur(tr.spent), Icons.receipt_long_outlined,
-          sub: 'Réservations : ${eur(tr.booked)}'),
-    ]);
+    final hero = SurfaceCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(trip.hasBudget ? 'Budget restant' : 'Restant sur vos prévisions',
+            style: TextStyle(color: c.secondary, fontSize: 14, fontWeight: FontWeight.w500)),
+        Text(eur(tr.remaining),
+            style: TextStyle(
+                fontSize: 52, fontWeight: FontWeight.w700, letterSpacing: -2, color: tr.remaining < 0 ? c.red : (low ? c.orange : c.label))),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: ref <= 0 ? 0 : ((ref - tr.remaining) / ref).clamp(0, 1).toDouble(),
+            minHeight: 8,
+            color: tr.remaining < 0 ? c.red : (low ? c.orange : c.accent),
+            backgroundColor: c.fill,
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(children: [
+          _Metric('Aujourd\'hui', eur(tr.availableToday), color: tr.availableToday < 0 ? c.red : c.green),
+          _Metric('Par jour', eur(tr.dailyBudget),
+              caption: '${tr.remainingDays} jour${tr.remainingDays > 1 ? 's' : ''} restant${tr.remainingDays > 1 ? 's' : ''}'),
+          _Metric('Dépensé', eur(tr.spent), caption: 'réservations ${eur(tr.booked)}'),
+        ]),
+      ]),
+    );
 
     final quick = Wrap(
       spacing: 8,
@@ -57,75 +76,63 @@ class TrackingScreen extends StatelessWidget {
         ExpenseCategory.transport,
         ExpenseCategory.activities,
         ExpenseCategory.other,
-      ]
-          .map((c) => FilledButton.tonalIcon(
-                onPressed: () => _add(context, trip, c),
-                icon: Icon(expenseIcon(c)),
-                label: Text(c.label),
-              ))
-          .toList(),
+      ].map((e) => Tag(icon: expenseIcon(e), label: e.label, selected: false, onTap: () => _add(context, trip, e))).toList(),
     );
 
-    final comparison = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Prévu / réel', style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            ...tr.comparisons.map((c) => _ComparisonRow(c)),
-          ],
-        ),
-      ),
-    );
+    final comparison = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const GroupHeader('Prévu et réel'),
+      GroupedList(children: tr.comparisons.map((x) => _ComparisonRow(x)).toList()),
+    ]);
 
-    final expenses = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Dépenses (${trip.expenses.length})', style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-            if (trip.expenses.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('Aucune dépense pour l\'instant. Utilisez les boutons rapides ou « Ajouter ».'),
-              ),
-            ..._grouped(context, app, trip),
-          ],
-        ),
-      ),
+    final expenses = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GroupHeader('Dépenses (${trip.expenses.length})'),
+        if (trip.expenses.isEmpty)
+          SurfaceCard(
+            child: Text('Aucune dépense pour l\'instant. Touchez une catégorie ou « Ajouter ».',
+                style: TextStyle(color: c.secondary)),
+          )
+        else
+          ..._grouped(context, app, trip),
+      ],
     );
 
     return Scaffold(
-      appBar: AppBar(title: Text('Suivi · ${trip.name}')),
+      appBar: AppBar(title: Text(trip.name)),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _add(context, trip),
-        icon: const Icon(Icons.add),
-        label: const Text('Ajouter une dépense'),
+        icon: const Icon(CupertinoIcons.add),
+        label: const Text('Ajouter', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 100),
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1300),
+            constraints: const BoxConstraints(maxWidth: 1200),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                figures,
-                const SizedBox(height: 12),
-                quick,
-                const SizedBox(height: 12),
+                Text('Dépenses', style: Theme.of(context).textTheme.displaySmall),
+                const SizedBox(height: 16),
                 if (wide)
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Expanded(child: comparison),
-                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        hero,
+                        const SizedBox(height: 16),
+                        quick,
+                        comparison,
+                      ]),
+                    ),
+                    const SizedBox(width: 24),
                     Expanded(child: expenses),
                   ])
                 else ...[
+                  hero,
+                  const SizedBox(height: 16),
+                  quick,
                   comparison,
-                  const SizedBox(height: 12),
                   expenses,
                 ],
               ],
@@ -137,105 +144,107 @@ class TrackingScreen extends StatelessWidget {
   }
 
   List<Widget> _grouped(BuildContext context, AppState app, Trip trip) {
-    final out = <Widget>[];
-    DateTime? last;
+    final c = AppColors.of(context);
+    final days = <DateTime>[];
     for (final e in trip.expenses) {
       final d = Trip.dateOnly(e.date);
-      if (d != last) {
-        last = d;
-        final total = trip.expenses.where((x) => Trip.dateOnly(x.date) == d).fold(0.0, (a, x) => a + x.amountEur);
-        out.add(Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 4),
-          child: Row(children: [
-            Expanded(child: Text(dayLong(d), style: const TextStyle(fontWeight: FontWeight.w700))),
-            Text(eur(total, cents: true), style: const TextStyle(fontWeight: FontWeight.w700)),
-          ]),
-        ));
-      }
-      out.add(Dismissible(
-        key: ValueKey(e.id),
-        direction: DismissDirection.endToStart,
-        background: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 16),
-          color: Theme.of(context).colorScheme.errorContainer,
-          child: const Icon(Icons.delete_outline),
-        ),
-        onDismissed: (_) => app.removeExpense(trip, e.id),
-        child: ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: CircleAvatar(child: Icon(expenseIcon(e.category))),
-          title: Text(e.note.isEmpty ? e.category.label : e.note),
-          subtitle: Text('${e.category.label} · ${hm(e.date)}'
-              '${e.currency != 'EUR' ? ' · ${money(e.originalAmount, e.currency)}' : ''}'),
-          trailing: Text(eur(e.amountEur, cents: true), style: const TextStyle(fontWeight: FontWeight.w700)),
-        ),
-      ));
+      if (!days.contains(d)) days.add(d);
     }
-    return out;
+    return days.map((d) {
+      final items = trip.expenses.where((x) => Trip.dateOnly(x.date) == d).toList();
+      final total = items.fold(0.0, (a, x) => a + x.amountEur);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+            child: Row(children: [
+              Expanded(child: Text(dayLong(d), style: TextStyle(fontSize: 13, color: c.secondary, fontWeight: FontWeight.w500))),
+              Text(eur(total, cents: true), style: TextStyle(fontSize: 13, color: c.secondary, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+          GroupedList(
+            children: items
+                .map((e) => Dismissible(
+                      key: ValueKey(e.id),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        color: c.red,
+                        child: const Icon(CupertinoIcons.trash, color: Colors.white),
+                      ),
+                      onDismissed: (_) => app.removeExpense(trip, e.id),
+                      child: GroupedRow(
+                        leading: IconTile(expenseIcon(e.category), expenseColor(c, e.category), size: 32),
+                        title: e.note.isEmpty ? e.category.label : e.note,
+                        subtitle: '${hm(e.date)}${e.currency != 'EUR' ? ' · ${money(e.originalAmount, e.currency)}' : ''}',
+                        trailing: Text(eur(e.amountEur, cents: true), style: const TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ]),
+      );
+    }).toList();
   }
 }
 
-class _Figure extends StatelessWidget {
+class _Metric extends StatelessWidget {
   final String label;
   final String value;
-  final IconData icon;
-  final String? sub;
-  final bool danger;
-  const _Figure(this.label, this.value, this.icon, {this.sub, this.danger = false});
+  final String? caption;
+  final Color? color;
+  const _Metric(this.label, this.value, {this.caption, this.color});
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    return Card(
-      color: danger ? scheme.errorContainer : scheme.primaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [Icon(icon, size: 20), const SizedBox(width: 6), Text(label, style: tt.labelLarge)]),
-            const SizedBox(height: 6),
-            Text(value, style: tt.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
-            if (sub != null) Text(sub!, style: tt.bodySmall),
-          ],
-        ),
-      ),
+    final c = AppColors.of(context);
+    return Expanded(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: TextStyle(fontSize: 13, color: c.secondary)),
+        Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.5, color: color)),
+        if (caption != null) Text(caption!, style: TextStyle(fontSize: 12, color: c.secondary)),
+      ]),
     );
   }
 }
 
 class _ComparisonRow extends StatelessWidget {
-  final CategoryComparison c;
-  const _ComparisonRow(this.c);
+  final CategoryComparison x;
+  const _ComparisonRow(this.x);
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final ratio = c.ratio.isFinite ? c.ratio : 1.0;
+    final c = AppColors.of(context);
+    final ratio = x.ratio.isFinite ? x.ratio : 1.0;
     final color = ratio >= 1
-        ? scheme.error
+        ? c.red
         : ratio >= 0.8
-            ? Colors.orange.shade800
-            : scheme.primary;
+            ? c.orange
+            : c.accent;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(children: [
-            Expanded(child: Text(c.label, style: const TextStyle(fontWeight: FontWeight.w600))),
-            Text('${eur(c.actual)} / ${eur(c.planned)}', style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+            IconTile(expenseIcon(x.categories.first), expenseColor(c, x.categories.first), size: 26),
+            const SizedBox(width: 10),
+            Expanded(child: Text(x.label, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15))),
+            Text.rich(TextSpan(children: [
+              TextSpan(text: eur(x.actual), style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+              TextSpan(text: ' / ${eur(x.planned)}', style: TextStyle(color: c.secondary)),
+            ])),
           ]),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           ClipRRect(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(
               value: ratio.clamp(0, 1).toDouble(),
-              minHeight: 8,
+              minHeight: 5,
               color: color,
-              backgroundColor: scheme.surfaceContainerHighest,
+              backgroundColor: c.fill,
             ),
           ),
         ],

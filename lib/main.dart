@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import 'state/app_state.dart';
 import 'ui/screens/home_screen.dart';
+import 'ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +23,6 @@ class BudgetVoyageApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF00796B);
     return ChangeNotifierProvider.value(
       value: state,
       child: MaterialApp(
@@ -35,8 +35,8 @@ class BudgetVoyageApp extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        theme: ThemeData(colorSchemeSeed: seed, useMaterial3: true),
-        darkTheme: ThemeData(colorSchemeSeed: seed, brightness: Brightness.dark, useMaterial3: true),
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
         home: const HomeScreen(),
       ),
     );

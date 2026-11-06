@@ -40,7 +40,27 @@ List<PlanStep> buildPlan(Trip t) {
   double sLat(CityStay s) => s.hotel?.lat ?? s.place.lat;
   double sLng(CityStay s) => s.hotel?.lng ?? s.place.lng;
 
-  // 1. Arrivée du vol
+  final mode = t.flight?.mode ?? t.travelMode;
+  // Lieu d'arrivée : aéroport, gare, ou directement le premier logement en voiture.
+  final (hubLat, hubLng) = switch (mode) {
+    TravelMode.plane => (dest.airportLat, dest.airportLng),
+    TravelMode.train || TravelMode.bus => (dest.stationLat, dest.stationLng),
+    TravelMode.car => (sLat(stays.first), sLng(stays.first)),
+  };
+  final hubShort = switch (mode) {
+    TravelMode.plane => 'aéroport',
+    TravelMode.train => 'gare',
+    TravelMode.bus => 'gare routière',
+    TravelMode.car => 'parking',
+  };
+  String arrivalTitle(FlightOption f) => switch (mode) {
+        TravelMode.plane => 'Arrivée du vol ${f.flightNumber}',
+        TravelMode.train => 'Arrivée du train ${f.flightNumber}',
+        TravelMode.bus => 'Arrivée du car ${f.airline}',
+        TravelMode.car => f.airline.startsWith('Covoiturage') ? 'Arrivée en covoiturage' : 'Arrivée en voiture',
+      };
+
+  // 1. Arrivée
   var cursor = DateTime(start.year, start.month, start.day, 14);
   if (t.flight != null) {
     final f = t.flight!;
@@ -48,11 +68,11 @@ List<PlanStep> buildPlan(Trip t) {
     steps.add(PlanStep(
       time: f.outArrive,
       kind: PlanKind.flightArrival,
-      title: 'Arrivée du vol ${f.flightNumber}',
+      title: arrivalTitle(f),
       subtitle: '${f.airline} · ${f.fromCode} → ${f.toCode}'
           '${f.outStops.isEmpty ? ' · direct' : ' · via ${f.outStops.join(', ')}'}',
-      lat: dest.airportLat,
-      lng: dest.airportLng,
+      lat: hubLat,
+      lng: hubLng,
     ));
   }
 
@@ -63,10 +83,10 @@ List<PlanStep> buildPlan(Trip t) {
     steps.add(PlanStep(
       time: tr.start.add(const Duration(minutes: 1)),
       kind: PlanKind.transfer,
-      title: 'Trajet aéroport → ${stays.first.place.name} (${tr.label})',
+      title: 'Trajet $hubShort → ${stays.first.place.name} (${tr.label})',
       subtitle: tr.steps.map((s) => '${_hm.format(s.time)} ${s.description}').join('\n'),
-      lat: (dest.airportLat + stays.first.place.lat) / 2,
-      lng: (dest.airportLng + stays.first.place.lng) / 2,
+      lat: (hubLat + stays.first.place.lat) / 2,
+      lng: (hubLng + stays.first.place.lng) / 2,
       cost: tr.price,
     ));
   }
@@ -140,10 +160,10 @@ List<PlanStep> buildPlan(Trip t) {
     steps.add(PlanStep(
       time: tr.start,
       kind: PlanKind.transfer,
-      title: 'Trajet ${dest.name} → aéroport (${tr.label})',
+      title: 'Trajet ${dest.name} → $hubShort (${tr.label})',
       subtitle: tr.steps.map((s) => '${_hm.format(s.time)} ${s.description}').join('\n'),
-      lat: (sLat(from) + dest.airportLat) / 2,
-      lng: (sLng(from) + dest.airportLng) / 2,
+      lat: (sLat(from) + hubLat) / 2,
+      lng: (sLng(from) + hubLng) / 2,
       cost: tr.price,
     ));
   }
@@ -152,11 +172,11 @@ List<PlanStep> buildPlan(Trip t) {
     steps.add(PlanStep(
       time: retDepart,
       kind: PlanKind.flightDeparture,
-      title: 'Vol retour ${f.airline}',
+      title: mode == TravelMode.plane ? 'Vol retour ${f.airline}' : '${mode.label} retour · ${f.airline}',
       subtitle: '${f.toCode} → ${f.fromCode}'
           '${f.retArrive != null ? ' · arrivée ${DateFormat('E d MMM HH:mm', 'fr_FR').format(f.retArrive!)}' : ''}',
-      lat: dest.airportLat,
-      lng: dest.airportLng,
+      lat: mode == TravelMode.car ? sLat(stays.last) : hubLat,
+      lng: mode == TravelMode.car ? sLng(stays.last) : hubLng,
       cost: f.totalPrice,
     ));
   }

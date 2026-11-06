@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +6,7 @@ import '../../../models/models.dart';
 import '../../../services/places.dart';
 import '../../../state/app_state.dart';
 import '../../../state/planner.dart';
+import '../../theme.dart';
 import '../../widgets/common.dart';
 import 'planner_screen.dart';
 
@@ -90,59 +92,59 @@ class _LodgingStepState extends State<LodgingStep> implements SubmittableStep {
     return true;
   }
 
+  Widget _choice(BuildContext context, bool multi, IconData icon, Color color, String title, String sub) {
+    return OptionCard(
+      selected: _multi == multi,
+      onTap: () => setState(() => _multi = multi),
+      child: Row(children: [
+        IconTile(icon, color, size: 44),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(sub, style: TextStyle(color: AppColors.of(context).secondary, fontSize: 14)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.watch<PlannerController>().trip;
-    final tt = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
+    final c = AppColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SectionTitle('Où allez-vous dormir ?',
-            subtitle: '${t.nights} nuits à répartir. Vous pourrez choisir un hôtel pour chaque ville.'),
+        SectionTitle('Où dormir ?', subtitle: '${t.nights} nuits à répartir.'),
         ResponsiveGrid(minItemWidth: 380, children: [
-          OptionCard(
-            selected: !_multi,
-            onTap: () => setState(() => _multi = false),
-            child: Row(children: [
-              const Icon(Icons.hotel, size: 36),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Un seul hôtel', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                  Text('Toutes les nuits à ${t.destination!.name}'),
-                ]),
-              ),
-            ]),
-          ),
-          OptionCard(
-            selected: _multi,
-            onTap: () => setState(() => _multi = true),
-            child: Row(children: [
-              const Icon(Icons.route, size: 36),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Plusieurs villes', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                  const Text('Un road-trip ou un circuit, trains entre les villes inclus'),
-                ]),
-              ),
-            ]),
-          ),
+          _choice(context, false, CupertinoIcons.bed_double_fill, c.accent, 'Un seul hôtel',
+              'Toutes les nuits à ${t.destination!.name}'),
+          _choice(context, true, CupertinoIcons.map_fill, const Color(0xFF5856D6), 'Plusieurs villes',
+              'Un circuit, trains entre les villes inclus'),
         ]),
         if (_multi) ...[
-          const SizedBox(height: 16),
-          Text('Villes, dans l\'ordre du circuit', style: tt.titleMedium),
-          const SizedBox(height: 8),
-          ..._rows.asMap().entries.map((e) {
-            final i = e.key;
-            final r = e.value;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  CircleAvatar(radius: 14, child: Text('${i + 1}')),
-                  const SizedBox(width: 10),
+          GroupHeader('Villes, dans l\'ordre du circuit',
+              trailing: Text(
+                '$_total / ${t.nights} nuits',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _total == t.nights ? c.green : c.red),
+              )),
+          GroupedList(children: [
+            ..._rows.asMap().entries.map((e) {
+              final i = e.key;
+              final r = e.value;
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                child: Row(children: [
+                  Container(
+                    width: 26,
+                    height: 26,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
+                    child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: RawAutocomplete<Place>(
                       key: ObjectKey(r),
@@ -150,21 +152,30 @@ class _LodgingStepState extends State<LodgingStep> implements SubmittableStep {
                       focusNode: r.focus,
                       displayStringForOption: (p) => p.name,
                       optionsBuilder: (v) => PlaceService.suggest(v.text),
-                      fieldViewBuilder: (context, c, focus, _) => TextField(
-                        controller: c,
+                      fieldViewBuilder: (context, ctl, focus, _) => TextField(
+                        controller: ctl,
                         focusNode: focus,
                         textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(labelText: 'Ville', border: OutlineInputBorder()),
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        decoration: InputDecoration(
+                          hintText: 'Ville',
+                          filled: true,
+                          fillColor: c.background,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        ),
                       ),
                       optionsViewBuilder: (context, onSelected, options) => Align(
                         alignment: Alignment.topLeft,
                         child: Material(
-                          elevation: 4,
-                          borderRadius: BorderRadius.circular(8),
+                          color: c.card,
+                          elevation: 8,
+                          shadowColor: Colors.black26,
+                          borderRadius: BorderRadius.circular(14),
+                          clipBehavior: Clip.antiAlias,
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxHeight: 280, maxWidth: 420),
                             child: ListView(
-                              padding: EdgeInsets.zero,
+                              padding: const EdgeInsets.symmetric(vertical: 6),
                               shrinkWrap: true,
                               children: options
                                   .map((p) => ListTile(
@@ -179,45 +190,27 @@ class _LodgingStepState extends State<LodgingStep> implements SubmittableStep {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  IconButton.filledTonal(
-                    onPressed: r.nights > 1 ? () => setState(() => r.nights--) : null,
-                    icon: const Icon(Icons.remove),
-                  ),
-                  SizedBox(
-                    width: 80,
-                    child: Text('${r.nights} nuit${r.nights > 1 ? 's' : ''}', textAlign: TextAlign.center),
-                  ),
-                  IconButton.filledTonal(
-                    onPressed: () => setState(() => r.nights++),
-                    icon: const Icon(Icons.add),
+                  const SizedBox(width: 12),
+                  CountStepper(
+                    value: r.nights,
+                    format: (v) => '$v nuit${v > 1 ? 's' : ''}',
+                    onChanged: (v) => setState(() => r.nights = v),
                   ),
                   IconButton(
                     tooltip: 'Retirer',
                     onPressed: _rows.length > 2 ? () => setState(() => _rows.removeAt(i).dispose()) : null,
-                    icon: const Icon(Icons.delete_outline),
+                    icon: Icon(CupertinoIcons.minus_circle_fill, color: _rows.length > 2 ? c.red : c.tertiary),
                   ),
-                ],
-              ),
-            );
-          }),
-          Row(
-            children: [
-              TextButton.icon(
-                onPressed: () => setState(() => _rows.add(_CityRow('', 1))),
-                icon: const Icon(Icons.add_location_alt_outlined),
-                label: const Text('Ajouter une ville'),
-              ),
-              const Spacer(),
-              Text(
-                'Total : $_total / ${t.nights} nuits',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: _total == t.nights ? scheme.primary : scheme.error,
-                ),
-              ),
-            ],
-          ),
+                ]),
+              );
+            }),
+            GroupedRow(
+              leading: Icon(CupertinoIcons.plus_circle_fill, color: c.green, size: 26),
+              title: 'Ajouter une ville',
+              trailing: const SizedBox.shrink(),
+              onTap: () => setState(() => _rows.add(_CityRow('', 1))),
+            ),
+          ]),
         ],
       ],
     );

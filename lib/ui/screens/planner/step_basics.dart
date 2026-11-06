@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -7,10 +8,11 @@ import '../../../services/places.dart';
 import '../../../state/app_state.dart';
 import '../../../state/planner.dart';
 import '../../format.dart';
+import '../../theme.dart';
 import '../../widgets/common.dart';
 import 'planner_screen.dart';
 
-/// Étape 1 : budget, destination, dates et voyageurs.
+/// Étape 1 : budget (ou pas), itinéraire, dates et voyageurs.
 class BasicsStep extends StatefulWidget {
   const BasicsStep({super.key});
 
@@ -25,6 +27,7 @@ class _BasicsStepState extends State<BasicsStep> implements SubmittableStep {
   TextEditingController? _destination;
   late DateTimeRange _dates;
   late int _travelers;
+  late bool _hasBudget;
 
   @override
   void initState() {
@@ -33,6 +36,7 @@ class _BasicsStepState extends State<BasicsStep> implements SubmittableStep {
     _budget = TextEditingController(text: t.budget > 0 ? t.budget.toStringAsFixed(0) : '');
     _dates = DateTimeRange(start: t.startDate, end: t.endDate);
     _travelers = t.travelers;
+    _hasBudget = t.hasBudget;
   }
 
   @override
@@ -40,6 +44,8 @@ class _BasicsStepState extends State<BasicsStep> implements SubmittableStep {
     _budget.dispose();
     super.dispose();
   }
+
+  double? get _budgetValue => double.tryParse(_budget.text.replaceAll(' ', '').replaceAll(',', '.'));
 
   @override
   Future<bool> submit() async {
@@ -63,7 +69,8 @@ class _BasicsStepState extends State<BasicsStep> implements SubmittableStep {
       start: Trip.dateOnly(_dates.start),
       end: Trip.dateOnly(_dates.end),
       travelers: _travelers,
-      budget: double.parse(_budget.text.replaceAll(' ', '').replaceAll(',', '.')),
+      budget: _hasBudget ? _budgetValue! : 0,
+      hasBudget: _hasBudget,
     );
     return true;
   }
@@ -84,30 +91,32 @@ class _BasicsStepState extends State<BasicsStep> implements SubmittableStep {
           controller: controller,
           focusNode: focus,
           textCapitalization: TextCapitalization.words,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500),
           decoration: InputDecoration(
             labelText: label,
-            prefixIcon: Icon(icon),
-            border: const OutlineInputBorder(),
-            helperText: 'Ville (ex. Tokyo, Lisbonne, New York…)',
+            prefixIcon: Icon(icon, size: 20),
           ),
-          validator: (v) => (v == null || v.trim().isEmpty) ? 'Champ obligatoire' : null,
+          validator: (v) => (v == null || v.trim().isEmpty) ? 'Indiquez une ville' : null,
         );
       },
       optionsViewBuilder: (context, onSelected, options) => Align(
         alignment: Alignment.topLeft,
         child: Material(
-          elevation: 4,
-          borderRadius: BorderRadius.circular(8),
+          color: AppColors.of(context).card,
+          elevation: 8,
+          shadowColor: Colors.black26,
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 320, maxWidth: 520),
             child: ListView(
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(vertical: 6),
               shrinkWrap: true,
               children: options
                   .map((p) => ListTile(
-                        leading: const Icon(Icons.location_city),
+                        leading: Icon(CupertinoIcons.location_solid, size: 18, color: AppColors.of(context).accent),
                         title: Text(p.name),
-                        subtitle: Text('${p.country} · ${p.currency}'),
+                        subtitle: Text(p.country),
                         onTap: () => onSelected(p),
                       ))
                   .toList(),
@@ -121,110 +130,134 @@ class _BasicsStepState extends State<BasicsStep> implements SubmittableStep {
   @override
   Widget build(BuildContext context) {
     final t = context.read<PlannerController>().trip;
-    final wide = MediaQuery.sizeOf(context).width > 800;
+    final c = AppColors.of(context);
+    final wide = MediaQuery.sizeOf(context).width > 900;
     final nights = _dates.end.difference(_dates.start).inDays;
 
-    final budgetField = TextFormField(
-      controller: _budget,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9 ,.]'))],
-      style: Theme.of(context).textTheme.headlineSmall,
-      decoration: const InputDecoration(
-        labelText: 'Budget maximum (tout compris)',
-        suffixText: '€',
-        prefixIcon: Icon(Icons.savings_outlined),
-        border: OutlineInputBorder(),
+    final budgetCard = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const GroupHeader('Budget'),
+      SurfaceCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Segmented<bool>(
+            options: const {true: 'Avec un budget', false: 'Sans budget'},
+            value: _hasBudget,
+            onChanged: (v) => setState(() => _hasBudget = v),
+          ),
+          const SizedBox(height: 18),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 220),
+            crossFadeState: _hasBudget ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+            firstChild: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Budget maximum, tout compris', style: TextStyle(color: c.secondary, fontSize: 14)),
+              TextFormField(
+                controller: _budget,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9 ,.]'))],
+                style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w700, letterSpacing: -1.5),
+                decoration: InputDecoration(
+                  hintText: '2 000',
+                  suffixText: '€',
+                  suffixStyle: TextStyle(fontSize: 30, fontWeight: FontWeight.w600, color: c.secondary),
+                  filled: false,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                ),
+                validator: (v) {
+                  if (!_hasBudget) return null;
+                  final n = _budgetValue;
+                  if (n == null || n <= 0) return 'Indiquez un budget';
+                  return null;
+                },
+              ),
+              Text('Chaque choix sera déduit de ce montant en temps réel.',
+                  style: TextStyle(color: c.secondary, fontSize: 13)),
+            ]),
+            secondChild: Row(children: [
+              IconTile(CupertinoIcons.infinite, c.accent, size: 40),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  'Planifiez librement : l\'app additionne le coût de vos choix au fur et à mesure, sans rien bloquer.',
+                  style: TextStyle(color: c.secondary, fontSize: 14.5, height: 1.35),
+                ),
+              ),
+            ]),
+          ),
+        ]),
       ),
-      validator: (v) {
-        final n = double.tryParse((v ?? '').replaceAll(' ', '').replaceAll(',', '.'));
-        if (n == null || n <= 0) return 'Indiquez un budget';
-        return null;
-      },
-    );
+    ]);
 
-    final origin = _cityField(
-      label: 'Ville de départ',
-      icon: Icons.flight_takeoff,
-      initial: t.origin?.name ?? 'Paris',
-      bind: (c) => _origin = c,
-    );
-    final dest = _cityField(
-      label: 'Destination',
-      icon: Icons.flight_land,
-      initial: t.destination?.name ?? '',
-      bind: (c) => _destination = c,
-    );
+    final route = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const GroupHeader('Itinéraire'),
+      _cityField(
+        label: 'Départ',
+        icon: CupertinoIcons.location,
+        initial: t.origin?.name ?? 'Paris',
+        bind: (c) => _origin = c,
+      ),
+      const SizedBox(height: 10),
+      _cityField(
+        label: 'Destination',
+        icon: CupertinoIcons.map_pin_ellipse,
+        initial: t.destination?.name ?? '',
+        bind: (c) => _destination = c,
+      ),
+    ]);
 
-    final dates = InkWell(
-      borderRadius: BorderRadius.circular(4),
-      onTap: () async {
-        final now = DateTime.now();
-        final r = await showDateRangePicker(
-          context: context,
-          firstDate: Trip.dateOnly(now),
-          lastDate: now.add(const Duration(days: 365 * 2)),
-          initialDateRange: _dates.start.isBefore(Trip.dateOnly(now))
-              ? DateTimeRange(start: Trip.dateOnly(now), end: Trip.dateOnly(now).add(const Duration(days: 7)))
-              : _dates,
-          helpText: 'Dates du séjour',
-          saveText: 'Valider',
-        );
-        if (r != null && r.end.isAfter(r.start)) setState(() => _dates = r);
-      },
-      child: InputDecorator(
-        decoration: const InputDecoration(
-          labelText: 'Dates',
-          prefixIcon: Icon(Icons.date_range),
-          border: OutlineInputBorder(),
+    final when = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const GroupHeader('Dates et voyageurs'),
+      GroupedList(children: [
+        GroupedRow(
+          leading: IconTile(CupertinoIcons.calendar, c.red),
+          title: '${dateFr(_dates.start)} → ${dateFr(_dates.end)}',
+          subtitle: '$nights nuit${nights > 1 ? 's' : ''}',
+          onTap: () async {
+            final now = Trip.dateOnly(DateTime.now());
+            final r = await showDateRangePicker(
+              context: context,
+              firstDate: now,
+              lastDate: now.add(const Duration(days: 365 * 2)),
+              initialDateRange: _dates.start.isBefore(now)
+                  ? DateTimeRange(start: now, end: now.add(const Duration(days: 7)))
+                  : _dates,
+              helpText: 'Dates du séjour',
+              saveText: 'Valider',
+            );
+            if (r != null && r.end.isAfter(r.start)) setState(() => _dates = r);
+          },
         ),
-        child: Text('${dateFr(_dates.start)} → ${dateFr(_dates.end)}  ($nights nuit${nights > 1 ? 's' : ''})'),
-      ),
-    );
-
-    final travelers = InputDecorator(
-      decoration: const InputDecoration(
-        labelText: 'Voyageurs',
-        prefixIcon: Icon(Icons.group_outlined),
-        border: OutlineInputBorder(),
-      ),
-      child: Row(
-        children: [
-          IconButton.filledTonal(
-            onPressed: _travelers > 1 ? () => setState(() => _travelers--) : null,
-            icon: const Icon(Icons.remove),
+        GroupedRow(
+          leading: IconTile(CupertinoIcons.person_2_fill, c.green),
+          title: 'Voyageurs',
+          trailing: CountStepper(
+            value: _travelers,
+            max: 12,
+            format: (v) => '$v',
+            onChanged: (v) => setState(() => _travelers = v),
           ),
-          Expanded(
-            child: Text('$_travelers voyageur${_travelers > 1 ? 's' : ''}',
-                textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
-          ),
-          IconButton.filledTonal(
-            onPressed: _travelers < 12 ? () => setState(() => _travelers++) : null,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
-    );
-
-    Widget pair(Widget a, Widget b) => wide
-        ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: a),
-            const SizedBox(width: 16),
-            Expanded(child: b),
-          ])
-        : Column(children: [a, const SizedBox(height: 16), b]);
+        ),
+      ]),
+    ]);
 
     return Form(
       key: _form,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SectionTitle('Où partez-vous, et avec quel budget ?',
-              subtitle: 'Chaque choix des étapes suivantes sera déduit de ce budget en temps réel.'),
-          budgetField,
-          const SizedBox(height: 16),
-          pair(origin, dest),
-          const SizedBox(height: 16),
-          pair(dates, travelers),
+          const SectionTitle('Votre voyage', subtitle: 'Où allez-vous, quand, et avec quel budget ?'),
+          if (wide)
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: budgetCard),
+              const SizedBox(width: 24),
+              Expanded(child: Column(children: [route, when])),
+            ])
+          else ...[
+            budgetCard,
+            route,
+            when,
+          ],
         ],
       ),
     );

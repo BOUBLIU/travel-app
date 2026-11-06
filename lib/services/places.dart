@@ -141,6 +141,23 @@ class PlaceService {
     return null;
   }
 
+  /// Géocode une adresse ou un nom d'hôtel (OpenStreetMap). Null si introuvable.
+  Future<(double, double)?> geocode(String query) async {
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {'q': query, 'format': 'json', 'limit': '1'});
+      final res = await _client
+          .get(uri, headers: {'User-Agent': 'BudgetVoyage/1.0 (application mobile)'})
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final list = jsonDecode(res.body) as List;
+      if (list.isEmpty) return null;
+      final r = list.first as Map<String, dynamic>;
+      return (double.parse(r['lat']), double.parse(r['lon']));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Résout un nom de ville : catalogue d'abord, puis géocodage OpenStreetMap.
   Future<Place?> resolve(String name) async {
     final local = findLocal(name);

@@ -41,7 +41,7 @@ class TripTracker {
 
   double get spent => trip.expenses.fold(0.0, (a, e) => a + e.amountEur);
 
-  double get remaining => trip.budget - booked - spent;
+  double get remaining => trip.effectiveBudget - booked - spent;
 
   double spentOn(DateTime day) => trip.expenses
       .where((e) => Trip.dateOnly(e.date) == Trip.dateOnly(day))
@@ -96,11 +96,12 @@ class TripTracker {
             'Il reste ${(c.planned - c.actual).toStringAsFixed(0)} € sur ${c.planned.toStringAsFixed(0)} € prévus.'));
       }
     }
-    if (trip.budget > 0) {
+    final ref = trip.effectiveBudget;
+    if (ref > 0) {
       if (remaining < 0) {
-        out.add(ThresholdAlert('total_100', 'Budget total dépassé',
-            'Vous avez dépassé votre budget de ${(-remaining).toStringAsFixed(0)} €.'));
-      } else if (remaining < trip.budget * 0.1) {
+        out.add(ThresholdAlert('total_100', trip.hasBudget ? 'Budget total dépassé' : 'Prévisions dépassées',
+            'Vous avez dépassé ${trip.hasBudget ? 'votre budget' : 'le total prévu'} de ${(-remaining).toStringAsFixed(0)} €.'));
+      } else if (remaining < ref * 0.1) {
         out.add(ThresholdAlert('total_90', 'Moins de 10 % du budget restant',
             'Il reste ${remaining.toStringAsFixed(0)} €, soit ${(remaining / remainingDays).toStringAsFixed(0)} € par jour.'));
       }

@@ -22,14 +22,17 @@ class PlannerController extends ChangeNotifier {
               budget: 2000,
             );
 
+  bool get hasBudget => trip.hasBudget;
   double get spent => trip.plannedTotal;
   double get remaining => trip.budget - spent;
-  double get progress => trip.budget <= 0 ? 0 : (spent / trip.budget).clamp(0, 1).toDouble();
-  bool get lowBudget => trip.budget > 0 && remaining < trip.budget * 0.1;
+  double get progress =>
+      !hasBudget || trip.budget <= 0 ? 0 : (spent / trip.budget).clamp(0, 1).toDouble();
+  bool get lowBudget => hasBudget && trip.budget > 0 && remaining < trip.budget * 0.1;
 
   /// Une option est "hors budget" si elle coûte plus que le budget restant,
   /// en tenant compte du prix du choix actuel qu'elle remplacerait.
-  bool fits(double price, {double replacing = 0}) => price <= remaining + replacing + 0.001;
+  /// Sans budget de départ, tout est permis.
+  bool fits(double price, {double replacing = 0}) => !hasBudget || price <= remaining + replacing + 0.001;
 
   void touch() => notifyListeners();
 
@@ -41,6 +44,7 @@ class PlannerController extends ChangeNotifier {
     required DateTime end,
     required int travelers,
     required double budget,
+    required bool hasBudget,
   }) {
     final changed = trip.destination?.name != destination.name ||
         trip.origin?.name != origin.name ||
@@ -53,7 +57,8 @@ class PlannerController extends ChangeNotifier {
       ..startDate = start
       ..endDate = end
       ..travelers = travelers
-      ..budget = budget;
+      ..budget = hasBudget ? budget : 0
+      ..hasBudget = hasBudget;
     if (trip.name.isEmpty || changed) trip.name = '${destination.name} — ${destination.country}';
     if (changed) {
       // Les prix dépendent de ces paramètres : on repart de zéro.
@@ -71,6 +76,16 @@ class PlannerController extends ChangeNotifier {
   }
 
   // ---- Étape 2 -------------------------------------------------------------
+  void setTravelMode(TravelMode m) {
+    if (trip.travelMode == m) return;
+    trip
+      ..travelMode = m
+      ..flight = null
+      ..arrivalTransfer = null
+      ..departureTransfer = null;
+    notifyListeners();
+  }
+
   void setFlight(FlightOption f) {
     if (trip.flight?.id != f.id) {
       // Les horaires des trajets dépendent du vol.
@@ -152,6 +167,38 @@ class PlannerController extends ChangeNotifier {
 
   void setHotel(int stay, HotelOption? h) {
     trip.stays[stay].hotel = h;
+    notifyListeners();
+  }
+
+  /// Bascule entre « trouver un hôtel » et « j'ai déjà réservé ».
+  void setAlreadyBooked(int stay, bool booked) {
+    final s = trip.stays[stay];
+    if (s.alreadyBooked == booked) return;
+    s
+      ..alreadyBooked = booked
+      ..hotel = null;
+    notifyListeners();
+  }
+
+  /// Hôtel réservé avant d'utiliser l'application : nom et prix total payé.
+  void setOwnHotel(int stay, {required String name, required double totalPaid, required String address,
+      required double lat, required double lng}) {
+    final s = trip.stays[stay];
+    s
+      ..alreadyBooked = true
+      ..hotel = HotelOption(
+        id: 'own-$stay-${s.place.name}',
+        name: name,
+        city: s.place.name,
+        stars: 0,
+        rating: 0,
+        reviews: 0,
+        pricePerNight: s.nights == 0 ? totalPaid : totalPaid / s.nights,
+        lat: lat,
+        lng: lng,
+        address: address.isEmpty ? s.place.name : address,
+        bookingUrl: '',
+      );
     notifyListeners();
   }
 
